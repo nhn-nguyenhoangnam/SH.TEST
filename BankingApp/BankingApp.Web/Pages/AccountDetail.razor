@@ -1,0 +1,292 @@
+@page "/accounts/{id:guid}"
+@inject AccountService AccountService
+@inject TransactionService TransactionService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Account Details</PageTitle>
+
+@if (isLoading)
+{
+    <p><em>Loading account details...</em></p>
+}
+else if (errorMessage != null)
+{
+    <div class="alert alert-danger">
+        <strong>Error:</strong> @errorMessage
+    </div>
+    <button class="btn btn-secondary" @onclick="GoBack">Back to Accounts</button>
+}
+else if (account != null)
+{
+    <div class="mb-4">
+        <h3>Account Details</h3>
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">@account.AccountHolderName</h5>
+                <p class="card-text">
+                    <strong>Account Number:</strong> @account.AccountNumber<br/>
+                    <strong>Balance:</strong> <span class="text-success fs-4">@account.Balance.ToString("C")</span>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Transaction Form -->
+    <div class="mb-4">
+        <h4>New Transaction</h4>
+        <div class="card">
+            <div class="card-body">
+                @if (transactionSuccess != null)
+                {
+                    <div class="alert alert-success alert-dismissible fade show">
+                        <strong>Success!</strong> @transactionSuccess
+                        <button type="button" class="btn-close" @onclick="() => transactionSuccess = null"></button>
+                    </div>
+                }
+                @if (transactionError != null)
+                {
+                    <div class="alert alert-danger alert-dismissible fade show">
+                        <strong>Error!</strong> @transactionError
+                        <button type="button" class="btn-close" @onclick="() => transactionError = null"></button>
+                    </div>
+                }
+
+                <EditForm Model="@transactionRequest" OnValidSubmit="HandleCreateTransaction">
+                    <DataAnnotationsValidator />
+                    
+                    <div class="mb-3">
+                        <label class="form-label">To Account Number</label>
+                        <input type="text" class="form-control" @bind="toAccountNumber" placeholder="Enter recipient account number" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Amount</label>
+                        <input type="number" step="0.01" class="form-control" @bind="transactionRequest.Amount" placeholder="Enter amount" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-control" @bind="transactionRequest.Description" placeholder="Enter description" required />
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+                        @if (isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Transfer Money
+                    </button>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction History -->
+    <div class="mb-4">
+        <h4>Transaction History</h4>
+        @if (isLoadingTransactions)
+        {
+            <p><em>Loading transactions...</em></p>
+        }
+        else if (transactions != null && transactions.Any())
+        {
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Account</th>
+                            <th>Amount</th>
+                            <th>Description</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var transaction in transactions)
+                        {
+                            var isSent = transaction.FromAccountId == account.Id;
+                            var typeClass = isSent ? "text-danger" : "text-success";
+                            var typeIcon = isSent ? "↑" : "↓";
+                            var typeText = isSent ? "Sent" : "Received";
+                            var otherAccount = isSent ? transaction.ToAccountNumber : transaction.FromAccountNumber;
+                            var amountPrefix = isSent ? "-" : "+";
+
+                            <tr>
+                                <td>@transaction.TransactionDate.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td class="@typeClass">@typeIcon @typeText</td>
+                                <td>@otherAccount</td>
+                                <td class="@typeClass">@amountPrefix@transaction.Amount.ToString("C")</td>
+                                <td>@transaction.Description</td>
+                                <td>
+                                    @if (transaction.Status == "Completed")
+                                    {
+                                        <span class="badge bg-success">@transaction.Status</span>
+                                    }
+                                    else if (transaction.Status == "Failed")
+                                    {
+                                        <span class="badge bg-danger">@transaction.Status</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning">@transaction.Status</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-info">No transactions found for this account.</div>
+        }
+    </div>
+
+    <button class="btn btn-secondary" @onclick="GoBack">Back to Accounts</button>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private AccountDto? account;
+    private List<TransactionDto>? transactions;
+    private List<AccountDto>? allAccounts;
+    
+    private bool isLoading = true;
+    private bool isLoadingTransactions = true;
+    private bool isSubmitting = false;
+    private string? errorMessage;
+    private string? transactionSuccess;
+    private string? transactionError;
+    
+    private string toAccountNumber = string.Empty;
+    private CreateTransactionRequest transactionRequest = new() { Description = string.Empty };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAccountDetails();
+        await LoadTransactions();
+        await LoadAllAccounts();
+    }
+
+    private async Task LoadAccountDetails()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            account = await AccountService.GetAccountByIdAsync(Id);
+            if (account == null)
+            {
+                errorMessage = "Account not found";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to load account: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadTransactions()
+    {
+        isLoadingTransactions = true;
+
+        try
+        {
+            var sentTransactions = await TransactionService.GetTransactionsAsync(fromAccountId: Id);
+            var receivedTransactions = await TransactionService.GetTransactionsAsync(toAccountId: Id);
+
+            transactions = new List<TransactionDto>();
+            if (sentTransactions?.Transactions != null)
+                transactions.AddRange(sentTransactions.Transactions);
+            if (receivedTransactions?.Transactions != null)
+                transactions.AddRange(receivedTransactions.Transactions);
+
+            transactions = transactions
+                .OrderByDescending(t => t.TransactionDate)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load transactions: {ex.Message}");
+        }
+        finally
+        {
+            isLoadingTransactions = false;
+        }
+    }
+
+    private async Task LoadAllAccounts()
+    {
+        try
+        {
+            AccountListResponse? response = await AccountService.GetAccountsAsync(pageSize: 100);
+            allAccounts = response?.Accounts;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load accounts: {ex.Message}");
+        }
+    }
+
+    private async Task HandleCreateTransaction()
+    {
+        if (account == null) return;
+
+        isSubmitting = true;
+        transactionSuccess = null;
+        transactionError = null;
+
+        try
+        {
+            var toAccount = allAccounts?.FirstOrDefault(a => 
+                a.AccountNumber?.Equals(toAccountNumber, StringComparison.OrdinalIgnoreCase) == true);
+
+            if (toAccount == null)
+            {
+                transactionError = "Recipient account not found";
+                return;
+            }
+
+            transactionRequest.FromAccountId = account.Id;
+            transactionRequest.ToAccountId = toAccount.Id;
+
+            var response = await TransactionService.CreateTransactionAsync(transactionRequest);
+
+            if (response?.Status == "Completed")
+            {
+                transactionSuccess = response.Message;
+                toAccountNumber = string.Empty;
+                transactionRequest = new CreateTransactionRequest { Description = string.Empty };
+                
+                await LoadAccountDetails();
+                await LoadTransactions();
+            }
+            else
+            {
+                transactionError = response?.Message ?? "Transaction failed";
+            }
+        }
+        catch (Exception ex)
+        {
+            transactionError = ex.Message;
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    private void GoBack()
+    {
+        NavigationManager.NavigateTo("/accounts");
+    }
+}

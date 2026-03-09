@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "BankingApp.Web": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "launchUrl": "/",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "http://localhost:6001"
+    }
+  }
+}
